@@ -1,93 +1,95 @@
-# Deep Learning Tuning Playbook
+# Руководство по тюну моделей
 
-*This is not an officially supported Google product.*
+_"Это неофициальный перевод неофициального документа от команды исследователей Google"._ [@averkij](https://t.me/averkij)
+
+Оригинал:
 
 **Varun Godbole<sup>&dagger;</sup>, George E. Dahl<sup>&dagger;</sup>, Justin Gilmer<sup>&dagger;</sup>, Christopher J. Shallue<sup>&Dagger;</sup>, Zachary Nado<sup>&dagger;</sup>**
-
 
 &dagger; Google Research, Brain Team
 
 &Dagger; Harvard University
 
-## Table of Contents
+## Содержание
 
--   [Who is this document for?](#who-is-this-document-for)
--   [Why a tuning playbook?](#why-a-tuning-playbook)
--   [Guide for starting a new project](#guide-for-starting-a-new-project)
-    -   [Choosing the model architecture](#choosing-a-model-architecture)
-    -   [Choosing the optimizer](#choosing-the-optimizer)
-    -   [Choosing the batch size](#choosing-the-batch-size)
-    -   [Choosing the initial configuration](#choosing-the-initial-configuration)
--   [A scientific approach to improving model performance](#a-scientific-approach-to-improving-model-performance)
-    -   [The incremental tuning strategy](#the-incremental-tuning-strategy)
-    -   [Exploration vs exploitation](#exploration-vs-exploitation)
-    -   [Choosing the goal for the next round of experiments](#choosing-the-goal-for-the-next-round-of-experiments)
-    -   [Designing the next round of experiments](#Designing-the-next-round-of-experiments)
-    -   [Determining whether to adopt a training pipeline change or
-        hyperparameter
-        configuration](#Determining-whether-to-adopt-a-training-pipeline-change-or-hyperparameter-configuration)
-    -   [After exploration concludes](#After-exploration-concludes)
--   [Determining the number of steps for each training run](#Determining-the-number-of-steps-for-each-training-run)
-    -   [Deciding how long to train when training is not compute-bound](#Deciding-how-long-to-train-when-training-is-not-compute-bound)
-    -   [Deciding how long to train when training is compute-bound](#Deciding-how-long-to-train-when-training-is-compute-bound)
--   [Additional guidance for the training pipeline](#Additional-guidance-for-the-training-pipeline)
-    -   [Optimizing the input pipeline](#Optimizing-the-input-pipeline)
-    -   [Evaluating model performance](Evaluating-model-performance)
-    -   [Saving checkpoints and retrospectively selecting the best checkpoint](#Saving-checkpoints-and-retrospectively-selecting-the-best-checkpoint)
-    -   [Setting up experiment tracking](#Setting-up-experiment-tracking)
-    -   [Batch normalization implementation details](#Batch-normalization-implementation-details)
-    -   [Considerations for multi-host pipelines](#Considerations-for-multi-host-pipelines)
--   [FAQs](#faqs)
--   [Acknowledgments](#acknowledgments)
--   [Citing](#citing)
--   [Contributing](#contributing)
+- [Для кого этот документ?](#who-is-this-document-for)
+- [Почему так назвали?](#why-a-tuning-playbook)
+- [На старте нового проекта](#guide-for-starting-a-new-project)
+  - [Выбор архитектуры](#choosing-a-model-architecture)
+  - [Выбор оптимизатора](#choosing-the-optimizer)
+  - [Выбор размера батча](#choosing-the-batch-size)
+  - [Выбор инициализации весов](#choosing-the-initial-configuration)
+- [Научный подход к улучшению производительности](#a-scientific-approach-to-improving-model-performance)
+  - [Стратегия постепенного улучшения](#the-incremental-tuning-strategy)
+  - [Exploration vs exploitation](#exploration-vs-exploitation)
+  - [Выбор цели для следующих экспериментов](#choosing-the-goal-for-the-next-round-of-experiments)
+  - [Планирование следующих экспериментов](#Designing-the-next-round-of-experiments)
+  - [Determining whether to adopt a training pipeline change or hyperparameter configuration](#Determining-whether-to-adopt-a-training-pipeline-change-or-hyperparameter-configuration)
+  - [После завершения исследования](#After-exploration-concludes)
+- [Определение количества шагов для каждого эксперимента](#Determining-the-number-of-steps-for-each-training-run)
+  - [Как долго тренировать, если ресурсы не ограничены](#Deciding-how-long-to-train-when-training-is-not-compute-bound)
+  - [Как долго тренировать, если ресурсы ограничены](#Deciding-how-long-to-train-when-training-is-compute-bound)
+- [Дополнительные рекомендации по пайплайну](#Additional-guidance-for-the-training-pipeline)
+  - [Оптимизация входных данных](#Optimizing-the-input-pipeline)
+  - [Оценка производительности модели](Evaluating-model-performance)
+  - [Сохранение чекпоинтов и последующий выбор лучшего чекпонта](#Saving-checkpoints-and-retrospectively-selecting-the-best-checkpoint)
+  - [Настройка логирования экспериментов](#Setting-up-experiment-tracking)
+  - [Детали про batch normalization](#Batch-normalization-implementation-details)
+  - [Рекомендации для распределенноых пайплайнов](#Considerations-for-multi-host-pipelines)
+- [FAQs](#faqs)
+- [Благодарности](#acknowledgments)
+- [Цитирование](#citing)
+- [Contributing](#contributing)
 
-## Who is this document for?
+## Для кого этот документ?
 
-This document is for engineers and researchers (both individuals and teams)
-interested in **maximizing the performance of deep learning models**. We assume
-basic knowledge of machine learning and deep learning concepts.
+Этот документ предназначен для инженеров и исследователей (как отдельных лиц,
+так и групп), заинтересованных в **максимальном повышении производительности
+своих DL моделей**. Мы предполагаем, что у вас есть базовые знания концепций
+машинного обучения.
 
-Our emphasis is on the **process of hyperparameter tuning**. We touch on other
-aspects of deep learning training, such as pipeline implementation and
-optimization, but our treatment of those aspects is not intended to be complete.
+Мы делаем акцент на **процессе подбора гиперпараметров**. Мы коснемся и других
+аспектов глубокого обучения, таких как создание и оптимизация пайплайна, но эти
+советы будут не всеобъемлющими.
 
-We assume the machine learning problem is a supervised learning problem or
-something that looks a lot like one (e.g. self-supervised). That said, some of
-the prescriptions in this document may also apply to other types of problems.
+Предположим, что решается задача обучения с учителем (_supervised learning_) или
+что-то очень похожее на нее (например, _self-supervised_). Тем не менее,
+некоторые рекомендации могут применяться и к другим типам задач.
 
 ## Why a tuning playbook?
 
-Currently, there is an astonishing amount of toil and guesswork involved in
-actually getting deep neural networks to work well in practice. Even worse, the
-actual recipes people use to get good results with deep learning are rarely
-documented. Papers gloss over the process that led to their final results in
-order to present a cleaner story, and machine learning engineers working on
-commercial problems rarely have time to take a step back and generalize their
-process. Textbooks tend to eschew practical guidance and prioritize fundamental
-principles, even if their authors have the necessary experience in applied work
-to provide useful advice. When preparing to create this document, we couldn't
-find any comprehensive attempt to actually explain *how to get good results with
-deep learning*. Instead, we found snippets of advice in blog posts and on social
-media, tricks peeking out of the appendix of research papers, occasional case
-studies about one particular project or pipeline, and a lot of confusion. There
-is a vast gulf between the results achieved by deep learning experts and less
-skilled practitioners using superficially similar methods. At the same time,
-these very experts readily admit some of what they do might not be
-well-justified. As deep learning matures and has a larger impact on the world,
-the community needs more resources covering useful recipes, including all the
-practical details that can be so critical for obtaining good results.
+Зачастую требуется очень много труда и догадок, чтобы на практике заставить
+глубокие нейронные сети работать качественно. Более того, стоящие советы,
+которые исследователи используют при обучении моделей, редко документируются.
+Статьи замалчивают детали процессов, которые привели к их окончательным
+результатам, чтобы предоставить более ясную картину. А инженеры, работающие над
+бизнес-задачами, редко находят время, чтобы оглянуться назад и как-то
+зафиксировать и обощить свои знания. Учебники, как правило, избегают практических
+указаний и отдают приоритет фундаментальным принципам, даже если их авторы
+имеют необходимый опыт прикладной работы, чтобы давать полезные советы.
+При подготовке к созданию этого документа мы не смогли найти какой-либо
+всеобъемлющей попытки собрать воедино таке полезные советы для глубокого обучения.
+Вместо этого мы поискали и нашли отдельные советы и трюки в блогах и социальных сетях,
+хитрости, встречающиеся в приложениях к статьям, случайные исследования по
+конкретным проектам или пайплайнам и много противоречивой информации. Существует огромная
+пропасть между результатами, достигнутыми экспертами по глубокому обучению
+и менее опытными программистами, использующими внешне похожие методы. В то же
+время эти самые эксперты с готовностью признают, что некоторые из их действий
+могут быть недостаточно оправданными. По мере того, как глубокое обучение
+развивается и оказывает все большее влияние на мир, сообществу требуется
+больше ресурсов, охватывающих полезные рецепты, включая все практические
+детали, которые могут иметь решающее значение для получения хороших результатов.
 
-We are a team of five researchers and engineers who have worked in deep learning
-for many years, some of us since as early as 2006. We have applied deep learning
-to problems in everything from speech recognition to astronomy, and learned a
-lot along the way. This document grew out of our own experience training neural
-networks, teaching new machine learning engineers, and advising our colleagues
-on the practice of deep learning. Although it has been gratifying to see deep
-learning go from a machine learning approach practiced by a handful of academic
-labs to a technology powering products used by billions of people, deep learning
-is still in its infancy as an engineering discipline and we hope this document
-encourages others to help systematize the field's experimental protocols.
+Мы — команда из пяти исследователей и инженеров, которые много лет работают в области
+глубокого обучения, некоторые из нас — еще с 2006 года. Мы работали и применяли глубокое
+обучение ко многим задачам, — от распознавания речи до астрономии, и многому научились
+на этом пути. Этот документ вырос из нашего собственного опыта обучения нейронных сетей,
+обучения новых ML инженеров и консультирования наших коллег по этой теме. Хотя было
+приятно видеть, как глубокое обучение переходит от подхода, практикуемого горсткой
+академических лабораторий, к технологии, обеспечивающей работу продуктов, используемых 
+миллиардами людей, глубокое обучение все еще находится в зачаточном состоянии как 
+инженерная дисциплина, и мынадеемся, что этот документ подстегнет другие попытки по 
+систематизации опыта проведения своих экспериментов.
 
 This document came about as we tried to crystalize our own approach to deep
 learning and thus it represents the opinions of the authors at the time of
